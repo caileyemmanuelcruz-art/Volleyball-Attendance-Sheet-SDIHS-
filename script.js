@@ -1,17 +1,20 @@
-
-
 /* ==========================================================================
-   VOLLEYBALL TRAINING ATTENDANCE — SCRIPT
+   TRAINING ATTENDANCE — SCRIPT
    Sections:
-     1. Player database
-     2. Storage helpers (Local Storage, per-day attendance)
-     3. Date / time helpers
-     4. Application state
-     5. DOM references
-     6. Rendering (cards, stats, report mode)
-     7. Filtering / sorting
-     8. Event handlers
-     9. Init
+     1. Player database (Volleyball roster)
+     2. Coach password / lock settings
+     3. Storage helpers (Supabase-backed, per-day attendance, realtime sync)
+     4. Date / time helpers
+     5. Application state
+     6. DOM references
+     7. Navigation between sport pages
+     8. Rendering (cards, stats, report mode)
+     9. Filtering / sorting (incl. grade -> section cascade)
+    10. Season-long per-player counters
+    11. Coach lock / unlock
+    12. Player Information tab
+    13. Event handlers
+    14. Init
    ========================================================================== */
 
 /* ==========================================================================
@@ -41,7 +44,7 @@ const ROSTER = [
   { id: "b16", name: "Mendoza, Mark Gabriel", gender: "Boy", grade: 10, section: "Sierra Madre", birthday: "05/02/2011" },
   { id: "b17", name: "Merhan, Jhon Vincent", gender: "Boy", grade: 9, section: "Mapagmahal", birthday: "07/13/2011" },
   { id: "b18", name: "Plandez, Jhon Harold", gender: "Boy", grade: 12, section: "HUMSS 1, Mirasol", birthday: "11/20/2009" },
-  { id: "b19", name: "Popanes, Jhay M.", gender: "Boy", grade: 8, section: "Magalang", birthday: "06/08/2011" },
+  { id: "b19", name: "Popanes, Jhay M.", gender: "Boy", grade: 9, section: "Magalang", birthday: "06/08/2011" },
   { id: "b20", name: "Ramos, Gabriel", gender: "Boy", grade: 10, section: "Kanlaon", birthday: "01/14/2011" },
   { id: "b21", name: "Redoma, Robert M.", gender: "Boy", grade: 8, section: "Ephesians", birthday: "09/22/2011" },
   { id: "b22", name: "Rodriguez, Jhon Ruan", gender: "Boy", grade: 11, section: "Yakal", birthday: "03/07/2010" },
@@ -80,55 +83,150 @@ const ROSTER = [
 ];
 
 /* ==========================================================================
-   2. STORAGE HELPERS
-   All attendance is kept in one Local Storage key, namespaced by date:
-   { "2026-07-03": { "b01": { present: true, timestamp: "8:43:17 AM" }, ... } }
+   2. COACH PASSWORD / LOCK SETTINGS
+   By default, the site loads LOCKED: nobody can mark attendance or edit
+   history. Entering this password unlocks editing for the rest of the
+   browser session (it re-locks automatically on page refresh).
+   To change the password, just edit the string below.
    ========================================================================== */
 
-const STORAGE_KEY = "vta_attendance_records";
+const COACH_PASSWORD = "spike7";
 
-// Read the full attendance store (all dates) from Local Storage.
+/* ==========================================================================
+   3. STORAGE HELPERS (Supabase-backed)
+   All attendance now lives in the "attendance" table in Supabase, one row
+   per player per date:
+     { id, created_at, player_id, date, present, timestamp }
+   An in-memory cache mirrors the old Local Storage shape so every other
+   part of the app (stats, report, season counters) can keep reading it
+   synchronously:
+   { "2026-07-03": { "b01": { present: true, timestamp: "8:43:17 AM" }, ... } }
+   The cache is populated once at startup from Supabase, kept in sync live
+   via a Realtime subscription, and updated optimistically on every write.
+
+   NOTE: for upsert-by-(player_id, date) to work without creating duplicate
+   rows, the "attendance" table needs a unique constraint on (player_id,
+   date). Run this once in the Supabase SQL editor if you haven't already:
+
+     alter table attendance
+       add constraint attendance_player_date_unique unique (player_id, date);
+
+   ========================================================================== */
+
+let recordsCache = {};
+let recordsLoaded = false;
+
+// Read the full attendance store (all dates) from the in-memory cache.
 function getAllRecords() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (err) {
-    console.error("Could not read attendance data:", err);
-    return {};
-  }
-}
-
-// Persist the full attendance store back to Local Storage.
-function saveAllRecords(allRecords) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(allRecords));
-  } catch (err) {
-    console.error("Could not save attendance data:", err);
-  }
+  return recordsCache;
 }
 
 // Get the attendance record object for one specific date (creates none if absent).
 function getRecordForDate(dateKey) {
-  const all = getAllRecords();
-  return all[dateKey] || {};
+  return recordsCache[dateKey] || {};
 }
 
-// Mark or unmark a single player present for a given date, then save.
-function setPlayerAttendance(dateKey, playerId, isPresent, timestamp) {
-  const all = getAllRecords();
-  if (!all[dateKey]) all[dateKey] = {};
+// Pull every attendance row from Supabase and rebuild the in-memory cache.
+// Called once at startup, and can be re-called to force a full resync.
+async function loadAllRecordsFromSupabase() {
+  const { data, error } = await supabaseClient
+    .from("attendance")
+    .select("player_id, date, present, timestamp");
 
-  if (isPresent) {
-    all[dateKey][playerId] = { present: true, timestamp: timestamp };
-  } else {
-    all[dateKey][playerId] = { present: false, timestamp: null };
+  if (error) {
+    console.error("Could not load attendance data from Supabase:", error);
+    window.alert("Could not load attendance data. Check your connection and refresh the page.");
+    return;
   }
 
-  saveAllRecords(all);
+  const rebuilt = {};
+  (data || []).forEach((row) => {
+    if (!rebuilt[row.date]) rebuilt[row.date] = {};
+    rebuilt[row.date][row.player_id] = {
+      present: !!row.present,
+      timestamp: row.timestamp || null,
+    };
+  });
+
+  recordsCache = rebuilt;
+  recordsLoaded = true;
+}
+
+// Mark or unmark a single player present for a given date. Updates the
+// local cache immediately (optimistic UI), then writes through to
+// Supabase. Other devices pick up the change via the Realtime subscription
+// below; this device also gets a Realtime echo, which is harmless since
+// the write is idempotent.
+async function setPlayerAttendance(dateKey, playerId, isPresent, timestamp) {
+  if (!recordsCache[dateKey]) recordsCache[dateKey] = {};
+  const previousEntry = recordsCache[dateKey][playerId];
+
+  recordsCache[dateKey][playerId] = isPresent
+    ? { present: true, timestamp: timestamp }
+    : { present: false, timestamp: null };
+
+  const { error } = await supabaseClient.from("attendance").upsert(
+    {
+      player_id: playerId,
+      date: dateKey,
+      present: isPresent,
+      timestamp: isPresent ? timestamp : null,
+    },
+    { onConflict: "player_id,date" }
+  );
+
+  if (error) {
+    console.error("Could not save attendance to Supabase:", error);
+
+    // Roll back the optimistic update so the UI reflects reality.
+    if (previousEntry) {
+      recordsCache[dateKey][playerId] = previousEntry;
+    } else {
+      delete recordsCache[dateKey][playerId];
+    }
+    refreshAll();
+    window.alert("Could not save attendance — check your connection and try again.");
+  }
+}
+
+// Apply one Realtime change (from any device, including this one) to the
+// local cache and repaint whatever's on screen.
+function applyRealtimeChange(payload) {
+  const row = payload.eventType === "DELETE" ? payload.old : payload.new;
+  if (!row || !row.date || !row.player_id) return;
+
+  if (payload.eventType === "DELETE") {
+    if (recordsCache[row.date]) delete recordsCache[row.date][row.player_id];
+  } else {
+    if (!recordsCache[row.date]) recordsCache[row.date] = {};
+    recordsCache[row.date][row.player_id] = {
+      present: !!row.present,
+      timestamp: row.timestamp || null,
+    };
+  }
+
+  refreshAll();
+}
+
+// Subscribe to live changes on the attendance table so every open device
+// (coach's tablet, phone at the gym, etc.) stays in sync instantly.
+function subscribeToRealtimeUpdates() {
+  supabaseClient
+    .channel("attendance-changes")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "attendance" },
+      applyRealtimeChange
+    )
+    .subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.error("Realtime subscription issue:", status);
+      }
+    });
 }
 
 /* ==========================================================================
-   3. DATE / TIME HELPERS
+   4. DATE / TIME HELPERS
    ========================================================================== */
 
 // "2026-07-03" style key used to namespace attendance by day.
@@ -164,10 +262,11 @@ function todayKey() {
 }
 
 /* ==========================================================================
-   4. APPLICATION STATE
+   5. APPLICATION STATE
    ========================================================================== */
 
 const state = {
+  activePage: "volleyball",     // volleyball | basketball | athletics | dance | playerinfo
   viewingDateKey: todayKey(),   // which day's attendance is on screen
   searchTerm: "",
   genderFilter: "all",
@@ -175,18 +274,31 @@ const state = {
   sectionFilter: "all",
   sortBy: "name-asc",
   reportMode: false,
+  unlocked: false,              // coach edit privileges for this session
+  piSport: "",                  // Player Information: selected sport
+  piSearchTerm: "",
 };
 
 /* ==========================================================================
-   5. DOM REFERENCES
+   6. DOM REFERENCES
    ========================================================================== */
 
 const dom = {
+  navButtons: document.querySelectorAll(".nav-btn"),
+  pages: {
+    volleyball: document.getElementById("page-volleyball"),
+    basketball: document.getElementById("page-basketball"),
+    athletics: document.getElementById("page-athletics"),
+    dance: document.getElementById("page-dance"),
+    playerinfo: document.getElementById("page-playerinfo"),
+  },
+
   currentDate: document.getElementById("currentDate"),
   currentTime: document.getElementById("currentTime"),
   statTotal: document.getElementById("statTotal"),
   statPresent: document.getElementById("statPresent"),
   statAbsent: document.getElementById("statAbsent"),
+  filterSummary: document.getElementById("filterSummary"),
 
   historyBanner: document.getElementById("historyBanner"),
   historyBannerText: document.getElementById("historyBannerText"),
@@ -195,6 +307,7 @@ const dom = {
   controlsSection: document.getElementById("controlsSection"),
   searchInput: document.getElementById("searchInput"),
   dateSelect: document.getElementById("dateSelect"),
+  lockToggleBtn: document.getElementById("lockToggleBtn"),
   reportModeBtn: document.getElementById("reportModeBtn"),
   genderFilter: document.getElementById("genderFilter"),
   gradeFilter: document.getElementById("gradeFilter"),
@@ -216,10 +329,51 @@ const dom = {
   reportGirlsCount: document.getElementById("reportGirlsCount"),
   reportBoysCount: document.getElementById("reportBoysCount"),
   exitReportBtn: document.getElementById("exitReportBtn"),
+  downloadReportBtn: document.getElementById("downloadReportBtn"),
+
+  piSportSelect: document.getElementById("piSportSelect"),
+  piSearchWrap: document.getElementById("piSearchWrap"),
+  piSearchInput: document.getElementById("piSearchInput"),
+  piPlaceholder: document.getElementById("piPlaceholder"),
+  piEmptySport: document.getElementById("piEmptySport"),
+  piListWrap: document.getElementById("piListWrap"),
+  piList: document.getElementById("piList"),
 };
 
 /* ==========================================================================
-   6. RENDERING
+   7. NAVIGATION BETWEEN SPORT PAGES
+   ========================================================================== */
+
+function switchPage(pageName) {
+  state.activePage = pageName;
+
+  Object.keys(dom.pages).forEach((key) => {
+    dom.pages[key].classList.toggle("hidden", key !== pageName);
+  });
+
+  dom.navButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.page === pageName);
+  });
+
+  // Leaving Volleyball while Report Mode was open should reset it, so
+  // coming back later starts on the normal grid view.
+  if (pageName !== "volleyball" && state.reportMode) {
+    exitReportMode();
+  }
+
+  if (pageName === "playerinfo") {
+    renderPlayerInfo();
+  }
+}
+
+function onNavClick(e) {
+  const btn = e.target.closest(".nav-btn");
+  if (!btn) return;
+  switchPage(btn.dataset.page);
+}
+
+/* ==========================================================================
+   8. RENDERING
    ========================================================================== */
 
 // Update the live date/time display in the header. Also detects midnight
@@ -245,43 +399,70 @@ function updateClock() {
   dom.dateSelect.max = liveTodayKey;
 }
 
-// Whether the date currently being viewed is today (and therefore editable).
+// Whether the date currently being viewed is today.
 function isViewingToday() {
   return state.viewingDateKey === todayKey();
 }
 
-// Recompute totals for the date being viewed and paint the scoreboard.
-function updateStats() {
-  const record = getRecordForDate(state.viewingDateKey);
-  const presentCount = ROSTER.filter((p) => record[p.id] && record[p.id].present).length;
-
-  dom.statTotal.textContent = ROSTER.length;
-  dom.statPresent.textContent = presentCount;
-  dom.statAbsent.textContent = ROSTER.length - presentCount;
+// Whether attendance can currently be edited: today is always editable
+// unless someone locks it further; past days need the coach unlock.
+function canEdit() {
+  return isViewingToday() || state.unlocked;
 }
 
-// Show/hide the "viewing a past, read-only date" banner.
+// Recompute totals for the CURRENTLY FILTERED set of players and paint
+// the scoreboard, so the numbers always match what's on screen.
+function updateStats() {
+  const record = getRecordForDate(state.viewingDateKey);
+  const filtered = getFilteredSortedRoster();
+  const presentCount = filtered.filter((p) => record[p.id] && record[p.id].present).length;
+
+  dom.statTotal.textContent = filtered.length;
+  dom.statPresent.textContent = presentCount;
+  dom.statAbsent.textContent = filtered.length - presentCount;
+
+  dom.filterSummary.textContent = buildFilterSummaryText(filtered.length);
+}
+
+// Human-readable summary of which filters are currently narrowing the list.
+function buildFilterSummaryText(count) {
+  const parts = [];
+  if (state.genderFilter !== "all") parts.push(state.genderFilter === "Boy" ? "Boys" : "Girls");
+  if (state.gradeFilter !== "all") parts.push(`Grade ${state.gradeFilter}`);
+  if (state.sectionFilter !== "all") parts.push(state.sectionFilter);
+  if (state.searchTerm.trim()) parts.push(`matching "${state.searchTerm.trim()}"`);
+
+  if (parts.length === 0) {
+    return `Showing all ${ROSTER.length} players`;
+  }
+  return `Showing ${count} player${count === 1 ? "" : "s"} — ${parts.join(" · ")}`;
+}
+
+// Show/hide the "viewing a past date" banner and reflect lock status.
 function updateHistoryBanner() {
   if (isViewingToday()) {
     dom.historyBanner.classList.add("hidden");
     return;
   }
   const niceDate = formatDateLong(new Date(state.viewingDateKey + "T00:00:00"));
-  dom.historyBannerText.textContent = `Viewing ${niceDate} — this attendance sheet is read-only.`;
+  dom.historyBannerText.textContent = state.unlocked
+    ? `Viewing ${niceDate} — unlocked for editing (coach mode).`
+    : `Viewing ${niceDate} — this attendance sheet is read-only. Unlock to edit.`;
   dom.historyBanner.classList.remove("hidden");
 }
 
 // Build one player card element.
-function buildStudentCard(player, record) {
+function buildStudentCard(player, record, seasonStats) {
   const entry = record[player.id];
   const isPresent = !!(entry && entry.present);
-  const editable = isViewingToday();
+  const editable = canEdit();
 
   const card = document.createElement("div");
   card.className = "student-card" + (player.gender === "Girl" ? " gender-girl" : "") + (isPresent ? " is-present" : "");
 
   const genderTagClass = player.gender === "Girl" ? "tag tag-girl" : "tag";
   const birthdayText = player.birthday ? player.birthday : "Not on file";
+  const stats = seasonStats[player.id];
 
   card.innerHTML = `
     <div class="card-top">
@@ -304,6 +485,11 @@ function buildStudentCard(player, record) {
         : `<span class="readonly-note">Locked</span>`
       }
     </div>
+    <div class="season-counter">
+      <span class="sc-present">${stats.present} Present</span>
+      <span class="sc-absent">${stats.absent} Absent</span>
+      <span>· ${stats.trainings} training${stats.trainings === 1 ? "" : "s"} so far</span>
+    </div>
   `;
 
   return card;
@@ -319,6 +505,7 @@ function escapeHtml(str) {
 // Apply search + filters + sort to the roster and render the grid.
 function renderGrid() {
   const record = getRecordForDate(state.viewingDateKey);
+  const seasonStats = computeAllSeasonStats();
   const players = getFilteredSortedRoster();
 
   dom.studentGrid.innerHTML = "";
@@ -329,29 +516,10 @@ function renderGrid() {
     dom.emptyState.classList.add("hidden");
     const fragment = document.createDocumentFragment();
     players.forEach((player) => {
-      fragment.appendChild(buildStudentCard(player, record));
+      fragment.appendChild(buildStudentCard(player, record, seasonStats));
     });
     dom.studentGrid.appendChild(fragment);
   }
-}
-
-// Populate the Grade and Section filter dropdowns from the roster (once).
-function populateFilterOptions() {
-  const grades = [...new Set(ROSTER.map((p) => p.grade))].sort((a, b) => a - b);
-  grades.forEach((g) => {
-    const opt = document.createElement("option");
-    opt.value = g;
-    opt.textContent = `Grade ${g}`;
-    dom.gradeFilter.appendChild(opt);
-  });
-
-  const sections = [...new Set(ROSTER.map((p) => p.section))].sort((a, b) => a.localeCompare(b));
-  sections.forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    dom.sectionFilter.appendChild(opt);
-  });
 }
 
 /* ---- Report Mode rendering ---- */
@@ -383,11 +551,12 @@ function renderReport() {
 function buildReportRows(players, record) {
   const sorted = [...players].sort((a, b) => a.name.localeCompare(b.name));
   return sorted
-    .map((p) => {
+    .map((p, index) => {
       const entry = record[p.id];
       const isPresent = !!(entry && entry.present);
       return `
         <div class="report-row ${isPresent ? "present" : ""}">
+          <span class="report-row-index">${index + 1}.</span>
           <span class="report-row-name">${escapeHtml(p.name)}</span>
           ${isPresent
             ? `<span class="report-row-time">${entry.timestamp}</span>`
@@ -400,8 +569,54 @@ function buildReportRows(players, record) {
 }
 
 /* ==========================================================================
-   7. FILTERING / SORTING
+   9. FILTERING / SORTING (with grade -> section cascade)
    ========================================================================== */
+
+// Map of grade -> sorted list of sections that actually exist in that grade,
+// built straight from the roster so it always matches the real data.
+function buildGradeSectionMap() {
+  const map = {};
+  ROSTER.forEach((p) => {
+    if (!map[p.grade]) map[p.grade] = new Set();
+    map[p.grade].add(p.section);
+  });
+  const sorted = {};
+  Object.keys(map).sort((a, b) => a - b).forEach((grade) => {
+    sorted[grade] = [...map[grade]].sort((a, b) => a.localeCompare(b));
+  });
+  return sorted;
+}
+
+const GRADE_SECTION_MAP = buildGradeSectionMap();
+
+// Populate the Grade dropdown once, then keep Section in sync with it.
+function populateFilterOptions() {
+  Object.keys(GRADE_SECTION_MAP).forEach((grade) => {
+    const opt = document.createElement("option");
+    opt.value = grade;
+    opt.textContent = `Grade ${grade}`;
+    dom.gradeFilter.appendChild(opt);
+  });
+
+  populateSectionOptions("all");
+}
+
+// Rebuild the Section dropdown to only show sections within the chosen grade.
+// "all" grade shows every section across the whole roster.
+function populateSectionOptions(gradeValue) {
+  dom.sectionFilter.innerHTML = '<option value="all">All Sections</option>';
+
+  const sections = gradeValue === "all"
+    ? [...new Set(ROSTER.map((p) => p.section))].sort((a, b) => a.localeCompare(b))
+    : (GRADE_SECTION_MAP[gradeValue] || []);
+
+  sections.forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    dom.sectionFilter.appendChild(opt);
+  });
+}
 
 function getFilteredSortedRoster() {
   let players = ROSTER.filter((p) => {
@@ -431,20 +646,162 @@ function getFilteredSortedRoster() {
 }
 
 /* ==========================================================================
-   8. EVENT HANDLERS
+   10. SEASON-LONG PER-PLAYER COUNTERS
+   A "training day" is any date key in Local Storage that currently has at
+   least one player marked present. Simply toggling a player Present and
+   back to Not Yet Marked (a misclick) leaves no one present that day, so
+   it does NOT count as a training — this stays true even if the toggle
+   happened and was undone weeks ago, since we check the saved data itself
+   rather than remembering that an update occurred.
+   ========================================================================== */
+
+function computeAllSeasonStats() {
+  const allRecords = getAllRecords();
+
+  // Only keep dates where at least one player is currently present.
+  const trainingDates = Object.keys(allRecords).filter((date) =>
+    Object.values(allRecords[date]).some((entry) => entry && entry.present)
+  );
+
+  const stats = {};
+
+  ROSTER.forEach((p) => {
+    let present = 0;
+    trainingDates.forEach((date) => {
+      if (allRecords[date][p.id] && allRecords[date][p.id].present) present += 1;
+    });
+    stats[p.id] = {
+      present: present,
+      absent: trainingDates.length - present,
+      trainings: trainingDates.length,
+    };
+  });
+
+  return stats;
+}
+
+/* ==========================================================================
+   11. COACH LOCK / UNLOCK
+   The site loads locked by default so visitors can only view. Entering the
+   coach password unlocks marking attendance today AND editing/correcting
+   past, otherwise read-only, attendance sheets. It re-locks on refresh.
+   ========================================================================== */
+
+function updateLockButton() {
+  if (state.unlocked) {
+    dom.lockToggleBtn.textContent = "🔓 Unlocked (Coach)";
+    dom.lockToggleBtn.classList.remove("locked");
+    dom.lockToggleBtn.classList.add("unlocked");
+  } else {
+    dom.lockToggleBtn.textContent = "🔒 Locked";
+    dom.lockToggleBtn.classList.remove("unlocked");
+    dom.lockToggleBtn.classList.add("locked");
+  }
+}
+
+function toggleLock() {
+  if (state.unlocked) {
+    // Re-locking never requires a password.
+    state.unlocked = false;
+    updateLockButton();
+    refreshAll();
+    return;
+  }
+
+  const entered = window.prompt("Enter coach password to unlock editing:");
+  if (entered === null) return; // cancelled
+  if (entered === COACH_PASSWORD) {
+    state.unlocked = true;
+    updateLockButton();
+    refreshAll();
+  } else {
+    window.alert("Incorrect password.");
+  }
+}
+
+/* ==========================================================================
+   12. PLAYER INFORMATION TAB
+   Gated by a sport filter: nothing shows until a sport is chosen. Only
+   Volleyball has real roster + attendance data right now.
+   ========================================================================== */
+
+function onPiSportChange(e) {
+  state.piSport = e.target.value;
+  renderPlayerInfo();
+}
+
+function onPiSearchInput(e) {
+  state.piSearchTerm = e.target.value;
+  renderPlayerInfo();
+}
+
+function renderPlayerInfo() {
+  const sport = state.piSport;
+
+  if (!sport) {
+    dom.piPlaceholder.classList.remove("hidden");
+    dom.piEmptySport.classList.add("hidden");
+    dom.piSearchWrap.classList.add("hidden");
+    dom.piListWrap.classList.add("hidden");
+    return;
+  }
+
+  if (sport !== "volleyball") {
+    const labels = { basketball: "Basketball", athletics: "Athletics", dance: "Cultural Dance Group" };
+    dom.piPlaceholder.classList.add("hidden");
+    dom.piSearchWrap.classList.add("hidden");
+    dom.piListWrap.classList.add("hidden");
+    dom.piEmptySport.textContent = `No player data yet for ${labels[sport]} — it doesn't have a roster or attendance sheet set up.`;
+    dom.piEmptySport.classList.remove("hidden");
+    return;
+  }
+
+  // Volleyball: show the searchable list with season totals.
+  dom.piPlaceholder.classList.add("hidden");
+  dom.piEmptySport.classList.add("hidden");
+  dom.piSearchWrap.classList.remove("hidden");
+  dom.piListWrap.classList.remove("hidden");
+
+  const seasonStats = computeAllSeasonStats();
+  const term = state.piSearchTerm.toLowerCase();
+  const players = ROSTER
+    .filter((p) => p.name.toLowerCase().includes(term))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  dom.piList.innerHTML = players
+    .map((p) => {
+      const s = seasonStats[p.id];
+      return `
+        <div class="pi-row">
+          <span class="pi-row-name" data-label="Player">
+            <strong>${escapeHtml(p.name)}</strong>
+            <small>${p.gender} · Grade ${p.grade} · ${escapeHtml(p.section)}</small>
+          </span>
+          <span class="pi-present" data-label="Present">${s.present}</span>
+          <span class="pi-absent" data-label="Absent">${s.absent}</span>
+          <span class="pi-total" data-label="Trainings held">${s.trainings}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+/* ==========================================================================
+   13. EVENT HANDLERS
    ========================================================================== */
 
 // Toggle a single player's Present status for the date currently in view.
-// Only allowed when viewing today (past days are locked in buildStudentCard,
-// which simply omits the button, but we guard here too for safety).
 function handlePresentToggle(playerId) {
-  if (!isViewingToday()) return;
+  if (!canEdit()) return;
 
   const record = getRecordForDate(state.viewingDateKey);
   const entry = record[playerId];
   const currentlyPresent = !!(entry && entry.present);
 
   const now = new Date();
+  // Not awaited: the cache updates synchronously before the network call,
+  // so refreshAll() below already reflects the new state. The Supabase
+  // write continues in the background (see setPlayerAttendance).
   setPlayerAttendance(state.viewingDateKey, playerId, !currentlyPresent, formatTime(now));
 
   refreshAll();
@@ -460,21 +817,27 @@ function onGridClick(e) {
 function onSearchInput(e) {
   state.searchTerm = e.target.value;
   renderGrid();
+  updateStats();
 }
 
 function onGenderFilterChange(e) {
   state.genderFilter = e.target.value;
   renderGrid();
+  updateStats();
 }
 
 function onGradeFilterChange(e) {
   state.gradeFilter = e.target.value;
+  state.sectionFilter = "all";
+  populateSectionOptions(e.target.value);
   renderGrid();
+  updateStats();
 }
 
 function onSectionFilterChange(e) {
   state.sectionFilter = e.target.value;
   renderGrid();
+  updateStats();
 }
 
 function onSortChange(e) {
@@ -511,8 +874,60 @@ function exitReportMode() {
   updateHistoryBanner();
 }
 
+// Capture ONLY the report card as one PNG image and download it — the sticky
+// nav bar and any page chrome are explicitly hidden in the cloned document
+// so they can never bleed into the captured image, regardless of scroll
+// position. The coach doesn't have to take two separate screenshots.
+function downloadReportImage() {
+  const target = document.querySelector(".report-card");
+  const btn = dom.downloadReportBtn;
+
+  if (typeof html2canvas !== "function") {
+    window.alert("Image export isn't available right now — check your internet connection and try again.");
+    return;
+  }
+
+  const originalLabel = btn.textContent;
+  btn.textContent = "Generating image…";
+  btn.disabled = true;
+
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  window.scrollTo(0, 0);
+
+  html2canvas(target, {
+    backgroundColor: "#ffffff",
+    scale: 2, // sharper image for screenshots/printing
+    useCORS: true,
+    onclone: (clonedDoc) => {
+      // Strip anything outside the report card from the clone used for
+      // rendering, so only the attendance report itself is ever captured.
+      const nav = clonedDoc.querySelector(".main-nav");
+      if (nav) nav.style.display = "none";
+
+      const actions = clonedDoc.querySelector(".report-actions");
+      if (actions) actions.style.display = "none";
+    },
+  })
+    .then((canvas) => {
+      const link = document.createElement("a");
+      link.download = `attendance-report-${state.viewingDateKey}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    })
+    .catch((err) => {
+      console.error("Could not generate report image:", err);
+      window.alert("Something went wrong generating the image. Please try again.");
+    })
+    .finally(() => {
+      window.scrollTo(scrollX, scrollY);
+      btn.textContent = originalLabel;
+      btn.disabled = false;
+    });
+}
+
 /* ==========================================================================
-   9. INIT
+   14. INIT
    ========================================================================== */
 
 // Re-run everything that depends on the currently viewed date / data.
@@ -527,6 +942,8 @@ function refreshAll() {
 }
 
 function bindEvents() {
+  document.querySelector(".main-nav").addEventListener("click", onNavClick);
+
   dom.studentGrid.addEventListener("click", onGridClick);
   dom.searchInput.addEventListener("input", onSearchInput);
   dom.genderFilter.addEventListener("change", onGenderFilterChange);
@@ -535,11 +952,16 @@ function bindEvents() {
   dom.sortSelect.addEventListener("change", onSortChange);
   dom.dateSelect.addEventListener("change", onDateSelectChange);
   dom.backToTodayBtn.addEventListener("click", onBackToToday);
+  dom.lockToggleBtn.addEventListener("click", toggleLock);
   dom.reportModeBtn.addEventListener("click", enterReportMode);
   dom.exitReportBtn.addEventListener("click", exitReportMode);
+  dom.downloadReportBtn.addEventListener("click", downloadReportImage);
+
+  dom.piSportSelect.addEventListener("change", onPiSportChange);
+  dom.piSearchInput.addEventListener("input", onPiSearchInput);
 }
 
-function init() {
+async function init() {
   state.lastKnownToday = todayKey();
 
   populateFilterOptions();
@@ -547,9 +969,19 @@ function init() {
   dom.dateSelect.max = state.lastKnownToday;
   dom.dateSelect.value = state.viewingDateKey;
 
+  updateLockButton();
   bindEvents();
   updateClock();
+
+  // Show a lightweight loading state while the initial fetch from
+  // Supabase is in flight, so the grid doesn't briefly flash "all absent".
+  dom.studentGrid.innerHTML = '<p class="empty-state">Loading attendance data…</p>';
+
+  await loadAllRecordsFromSupabase();
   refreshAll();
+
+  // Stay in sync with every other device from now on.
+  subscribeToRealtimeUpdates();
 
   // Live clock, ticking every second; also drives midnight rollover checks.
   setInterval(updateClock, 1000);

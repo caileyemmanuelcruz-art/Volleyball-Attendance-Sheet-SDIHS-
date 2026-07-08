@@ -1,7 +1,5 @@
 
 
-
-
 /* ==========================================================================
    VOLLEYBALL TRAINING ATTENDANCE — STYLESHEET
    Design tokens: navy court blue + volleyball gold, scoreboard accents.
@@ -62,6 +60,55 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 0 48px;
+}
+
+/* ==========================================================================
+   MAIN NAVIGATION — sport tabs + player information
+   ========================================================================== */
+
+.main-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--navy);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  flex-wrap: wrap;
+}
+
+.nav-sports {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.nav-btn {
+  background: transparent;
+  border: none;
+  color: #C9D6E8;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.nav-btn:hover {
+  color: #fff;
+}
+
+.nav-btn.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.nav-player-info {
+  margin-left: auto;
 }
 
 button, select, input {
@@ -179,6 +226,14 @@ input:focus-visible {
   width: 1px;
   align-self: stretch;
   background: rgba(255, 255, 255, 0.15);
+}
+
+.filter-summary {
+  text-align: center;
+  color: #B9C6DA;
+  font-size: 12.5px;
+  margin: 10px 0 0;
+  letter-spacing: 0.2px;
 }
 
 /* ==========================================================================
@@ -319,6 +374,35 @@ select {
 
 .btn-secondary:hover {
   background: var(--navy-light);
+}
+
+/* --- Coach lock toggle --- */
+.btn-lock {
+  border: none;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 11px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-lock.locked {
+  background: var(--gray-light);
+  color: var(--ink-soft);
+}
+
+.btn-lock.locked:hover {
+  background: #D4D9E1;
+}
+
+.btn-lock.unlocked {
+  background: var(--success);
+  color: #fff;
+}
+
+.btn-lock.unlocked:hover {
+  background: #166030;
 }
 
 /* ==========================================================================
@@ -492,6 +576,181 @@ main {
   font-style: italic;
 }
 
+/* --- Season-long per-player counter --- */
+.season-counter {
+  display: flex;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  padding-top: 8px;
+  border-top: 1px dashed var(--gray-light);
+  font-family: var(--font-mono);
+}
+
+.season-counter .sc-present {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.season-counter .sc-absent {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   PLACEHOLDER SPORT PAGES
+   ========================================================================== */
+
+.placeholder-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 24px;
+}
+
+.placeholder-card {
+  background: var(--card-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 48px 40px;
+  text-align: center;
+  max-width: 420px;
+}
+
+.placeholder-icon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 14px;
+}
+
+.placeholder-card h2 {
+  font-family: var(--font-display);
+  font-size: 26px;
+  color: var(--navy);
+  margin: 0 0 10px;
+}
+
+.placeholder-card p {
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ==========================================================================
+   PLAYER INFORMATION PAGE
+   ========================================================================== */
+
+.playerinfo-page {
+  padding: 26px 24px 48px;
+}
+
+.playerinfo-panel {
+  max-width: 900px;
+  margin: 0 auto;
+  background: var(--card-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 26px 28px 30px;
+}
+
+.playerinfo-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  color: var(--navy);
+  margin: 0 0 4px;
+}
+
+.playerinfo-sub {
+  color: var(--gray);
+  font-size: 13.5px;
+  margin: 0 0 18px;
+}
+
+.pi-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.pi-controls select {
+  flex: 0 1 220px;
+}
+
+.pi-search-wrap {
+  flex: 1 1 220px;
+}
+
+.pi-placeholder {
+  text-align: center;
+  color: var(--gray);
+  padding: 30px 10px;
+  font-size: 14.5px;
+}
+
+.pi-list-wrap {
+  border-top: 1px solid var(--gray-light);
+  padding-top: 12px;
+}
+
+.pi-list-header {
+  display: grid;
+  grid-template-columns: 2.4fr 1fr 1fr 1.2fr;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray);
+  padding: 0 12px 8px;
+  font-weight: 600;
+}
+
+.pi-row {
+  display: grid;
+  grid-template-columns: 2.4fr 1fr 1fr 1.2fr;
+  align-items: center;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+
+.pi-row-name {
+  display: flex;
+  flex-direction: column;
+}
+
+.pi-row-name strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pi-row-name small {
+  color: var(--gray);
+  font-size: 11.5px;
+}
+
+.pi-present {
+  color: var(--success);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.pi-absent {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.pi-total {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+}
+
 /* ==========================================================================
    REPORT MODE
    ========================================================================== */
@@ -610,12 +869,25 @@ main {
 
 .report-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
   font-size: 13.5px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   background: var(--bg);
+}
+
+.report-row-index {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--gray);
+  min-width: 20px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.report-row.present .report-row-index {
+  color: var(--success);
 }
 
 .report-row.present {
@@ -625,6 +897,7 @@ main {
 .report-row-name {
   font-weight: 600;
   color: var(--ink);
+  flex: 1 1 auto;
 }
 
 .report-row-time {
@@ -644,9 +917,12 @@ main {
   color: var(--success);
 }
 
-.btn-exit-report {
-  display: block;
+.report-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
   margin: 24px auto 0;
+  flex-wrap: wrap;
 }
 
 /* ==========================================================================
@@ -703,6 +979,35 @@ main {
   .report-total-box {
     padding: 12px 18px;
     min-width: 90px;
+  }
+
+  .nav-btn {
+    padding: 12px 10px;
+    font-size: 12.5px;
+  }
+
+  .nav-player-info {
+    margin-left: 0;
+  }
+
+  .pi-list-header {
+    display: none;
+  }
+
+  .pi-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .pi-row span::before {
+    content: attr(data-label) ": ";
+    color: var(--gray);
+    font-family: var(--font-body);
+    font-weight: 600;
+  }
+
+  .playerinfo-panel {
+    padding: 20px 16px;
   }
 }
 
