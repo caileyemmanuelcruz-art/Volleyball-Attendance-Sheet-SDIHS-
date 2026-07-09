@@ -556,18 +556,42 @@ function renderReport() {
   dom.reportBoysList.innerHTML = buildReportRows(boys, record);
 }
 
+// Report Mode shows names as "Surname, First Name" only — dropping middle
+// names/initials so rows stay short and the two columns never overflow.
+// Full names (with middle names) still appear everywhere else in the app.
+function shortenNameForReport(fullName) {
+  const parts = fullName.split(",");
+  if (parts.length < 2) return fullName; // no comma — leave as-is, just in case
+
+  const surname = parts[0].trim();
+  const firstName = parts[1].trim().split(" ")[0]; // first word after the comma
+  return `${surname}, ${firstName}`;
+}
+
+// "8:04:52 AM" -> { time: "8:04", meridiem: "AM" }. Report Mode drops the
+// seconds and stacks AM/PM under the time so the timestamp column stays
+// narrow, leaving more room for the name column on small screens.
+function splitTimestampForReport(timestamp) {
+  if (!timestamp) return { time: "", meridiem: "" };
+  const [timePart, meridiem] = timestamp.split(" ");
+  const [hour, minute] = timePart.split(":");
+  return { time: `${hour}:${minute}`, meridiem: meridiem || "" };
+}
+
 function buildReportRows(players, record) {
   const sorted = [...players].sort((a, b) => a.name.localeCompare(b.name));
   return sorted
     .map((p, index) => {
       const entry = record[p.id];
       const isPresent = !!(entry && entry.present);
+      const { time, meridiem } = isPresent ? splitTimestampForReport(entry.timestamp) : { time: "", meridiem: "" };
+
       return `
         <div class="report-row ${isPresent ? "present" : ""}">
           <span class="report-row-index">${index + 1}.</span>
-          <span class="report-row-name">${escapeHtml(p.name)}</span>
+          <span class="report-row-name">${escapeHtml(shortenNameForReport(p.name))}</span>
           ${isPresent
-            ? `<span class="report-row-time">${entry.timestamp}</span>`
+            ? `<span class="report-row-time"><span class="report-time-value">${time}</span><span class="report-time-meridiem">${meridiem}</span></span>`
             : `<span class="report-row-status">ABSENT</span>`
           }
         </div>
