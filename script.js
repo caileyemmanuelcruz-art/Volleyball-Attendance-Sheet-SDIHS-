@@ -274,6 +274,7 @@ const state = {
   sectionFilter: "all",
   sortBy: "name-asc",
   reportMode: false,
+  reportPage: "girls",          // which report page is on screen: "girls" | "boys"
   unlocked: false,              // coach edit privileges for this session
   piSport: "",                  // Player Information: selected sport
   piSearchTerm: "",
@@ -324,10 +325,17 @@ const dom = {
   reportTotalAll: document.getElementById("reportTotalAll"),
   reportTotalPresent: document.getElementById("reportTotalPresent"),
   reportTotalAbsent: document.getElementById("reportTotalAbsent"),
-  reportGirlsList: document.getElementById("reportGirlsList"),
-  reportBoysList: document.getElementById("reportBoysList"),
-  reportGirlsCount: document.getElementById("reportGirlsCount"),
-  reportBoysCount: document.getElementById("reportBoysCount"),
+  reportPageTabs: document.getElementById("reportPageTabs"),
+  reportPageOne: document.getElementById("reportPageOne"),
+  reportPageTwo: document.getElementById("reportPageTwo"),
+  reportGirlsListP1: document.getElementById("reportGirlsListP1"),
+  reportBoysListP1: document.getElementById("reportBoysListP1"),
+  reportGirlsCountP1: document.getElementById("reportGirlsCountP1"),
+  reportBoysCountP1: document.getElementById("reportBoysCountP1"),
+  reportGirlsListP2: document.getElementById("reportGirlsListP2"),
+  reportBoysListP2: document.getElementById("reportBoysListP2"),
+  reportGirlsCountP2: document.getElementById("reportGirlsCountP2"),
+  reportBoysCountP2: document.getElementById("reportBoysCountP2"),
   exitReportBtn: document.getElementById("exitReportBtn"),
   downloadReportBtn: document.getElementById("downloadReportBtn"),
 
@@ -540,20 +548,37 @@ function renderReport() {
   dom.reportDate.textContent = formatDateLong(viewingDate);
   dom.reportTime.textContent = isViewingToday() ? formatTime(now) : "Historical record";
 
-  const girls = ROSTER.filter((p) => p.gender === "Girl");
-  const boys = ROSTER.filter((p) => p.gender === "Boy");
+  const girls = ROSTER.filter((p) => p.gender === "Girl").sort((a, b) => a.name.localeCompare(b.name));
+  const boys = ROSTER.filter((p) => p.gender === "Boy").sort((a, b) => a.name.localeCompare(b.name));
 
   const presentTotal = ROSTER.filter((p) => record[p.id] && record[p.id].present).length;
-
   dom.reportTotalAll.textContent = ROSTER.length;
   dom.reportTotalPresent.textContent = presentTotal;
   dom.reportTotalAbsent.textContent = ROSTER.length - presentTotal;
 
-  dom.reportGirlsCount.textContent = `${girls.filter((p) => record[p.id] && record[p.id].present).length}/${girls.length} present`;
-  dom.reportBoysCount.textContent = `${boys.filter((p) => record[p.id] && record[p.id].present).length}/${boys.length} present`;
+  // Split each gender list into two halves (13 + 13 for a 26-player roster,
+  // but this works for any count) so each page shows half the girls and
+  // half the boys, side by side — instead of one page per gender.
+  const girlsHalf = Math.ceil(girls.length / 2);
+  const boysHalf = Math.ceil(boys.length / 2);
 
-  dom.reportGirlsList.innerHTML = buildReportRows(girls, record);
-  dom.reportBoysList.innerHTML = buildReportRows(boys, record);
+  const girlsP1 = girls.slice(0, girlsHalf);
+  const girlsP2 = girls.slice(girlsHalf);
+  const boysP1 = boys.slice(0, boysHalf);
+  const boysP2 = boys.slice(boysHalf);
+
+  renderReportHalf(girlsP1, record, dom.reportGirlsListP1, dom.reportGirlsCountP1, 0);
+  renderReportHalf(boysP1, record, dom.reportBoysListP1, dom.reportBoysCountP1, 0);
+  renderReportHalf(girlsP2, record, dom.reportGirlsListP2, dom.reportGirlsCountP2, girlsHalf);
+  renderReportHalf(boysP2, record, dom.reportBoysListP2, dom.reportBoysCountP2, boysHalf);
+}
+
+// Renders one gender's half-list into one page, with row numbers continuing
+// on from the first half (e.g. Page 2 starts at 14, not back at 1).
+function renderReportHalf(players, record, listEl, countEl, startIndex) {
+  const presentCount = players.filter((p) => record[p.id] && record[p.id].present).length;
+  countEl.textContent = `${presentCount}/${players.length} present`;
+  listEl.innerHTML = buildReportRows(players, record, startIndex);
 }
 
 // Report Mode shows names as "Surname, First Name" only — dropping middle
@@ -578,9 +603,11 @@ function splitTimestampForReport(timestamp) {
   return { time: `${hour}:${minute}`, meridiem: meridiem || "" };
 }
 
-function buildReportRows(players, record) {
-  const sorted = [...players].sort((a, b) => a.name.localeCompare(b.name));
-  return sorted
+// startIndex lets the second half of a list continue numbering from where
+// the first half left off (e.g. 1–13 on Page 1, 14–26 on Page 2), since
+// "players" here is already just that page's slice of the full list.
+function buildReportRows(players, record, startIndex = 0) {
+  return players
     .map((p, index) => {
       const entry = record[p.id];
       const isPresent = !!(entry && entry.present);
@@ -589,7 +616,7 @@ function buildReportRows(players, record) {
       return `
         <div class="report-row ${isPresent ? "present" : ""}">
           <div class="report-row-top">
-            <span class="report-row-index">${index + 1}.</span>
+            <span class="report-row-index">${startIndex + index + 1}.</span>
             <span class="report-row-name">${escapeHtml(shortenNameForReport(p.name))}</span>
           </div>
           <div class="report-row-bottom">
@@ -899,6 +926,7 @@ function enterReportMode() {
   dom.mainView.classList.add("hidden");
   dom.historyBanner.classList.add("hidden");
   dom.reportView.classList.remove("hidden");
+  switchReportPage("page1");
   renderReport();
 }
 
@@ -910,11 +938,75 @@ function exitReportMode() {
   updateHistoryBanner();
 }
 
-// Capture ONLY the report card as one PNG image and download it — the sticky
-// nav bar and any page chrome are explicitly hidden in the cloned document
-// so they can never bleed into the captured image, regardless of scroll
-// position. The coach doesn't have to take two separate screenshots.
-function downloadReportImage() {
+// Show only the chosen page (Page 1 or Page 2) on screen — each page is
+// half the girls plus half the boys, side by side. The download always
+// produces two separate images, one per page, regardless of which one is
+// currently showing (see downloadReportImage).
+function switchReportPage(page) {
+  state.reportPage = page;
+
+  dom.reportPageOne.classList.toggle("hidden", page !== "page1");
+  dom.reportPageTwo.classList.toggle("hidden", page !== "page2");
+
+  dom.reportPageTabs.querySelectorAll(".report-page-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.page === page);
+  });
+}
+
+function onReportPageTabClick(e) {
+  const btn = e.target.closest(".report-page-tab");
+  if (!btn) return;
+  switchReportPage(btn.dataset.page);
+}
+
+// Capture just ONE report page (page1 or page2) as its own canvas. Everything
+// outside the report card — sticky nav, action buttons, the page tabs — is
+// hidden in the cloned document so it can never bleed into the image, and
+// only the requested page is shown while the other stays hidden.
+function captureReportPage(target, page) {
+  return html2canvas(target, {
+    backgroundColor: "#ffffff",
+    scale: 2, // sharper image for screenshots/printing
+    useCORS: true,
+    onclone: (clonedDoc) => {
+      const nav = clonedDoc.querySelector(".main-nav");
+      if (nav) nav.style.display = "none";
+
+      const actions = clonedDoc.querySelector(".report-actions");
+      if (actions) actions.style.display = "none";
+
+      const tabs = clonedDoc.querySelector("#reportPageTabs");
+      if (tabs) tabs.style.display = "none";
+
+      const pageOne = clonedDoc.querySelector("#reportPageOne");
+      const pageTwo = clonedDoc.querySelector("#reportPageTwo");
+
+      if (pageOne) pageOne.classList.toggle("hidden", page !== "page1");
+      if (pageTwo) pageTwo.classList.toggle("hidden", page !== "page2");
+    },
+  });
+}
+
+// Trigger a browser download for a canvas as a PNG file.
+function downloadCanvasAsPng(canvas, filename) {
+  const link = document.createElement("a");
+  link.download = filename;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+// Small pause between the two downloads — firing two link.click() downloads
+// back-to-back with zero delay can cause a browser to silently drop the
+// second one, so we give it a beat.
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// One click of the download button produces TWO separate PNGs — one photo
+// for Page 1 and one photo for Page 2 — regardless of which page happens to
+// be showing on screen. The coach never has to switch tabs and download
+// twice by hand.
+async function downloadReportImage() {
   const target = document.querySelector(".report-card");
   const btn = dom.downloadReportBtn;
 
@@ -924,42 +1016,34 @@ function downloadReportImage() {
   }
 
   const originalLabel = btn.textContent;
-  btn.textContent = "Generating image…";
+  const originalPage = state.reportPage;
   btn.disabled = true;
 
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
   window.scrollTo(0, 0);
 
-  html2canvas(target, {
-    backgroundColor: "#ffffff",
-    scale: 2, // sharper image for screenshots/printing
-    useCORS: true,
-    onclone: (clonedDoc) => {
-      // Strip anything outside the report card from the clone used for
-      // rendering, so only the attendance report itself is ever captured.
-      const nav = clonedDoc.querySelector(".main-nav");
-      if (nav) nav.style.display = "none";
+  try {
+    btn.textContent = "Generating page 1…";
+    const canvas1 = await captureReportPage(target, "page1");
+    downloadCanvasAsPng(canvas1, `attendance-report-page1-${state.viewingDateKey}.png`);
 
-      const actions = clonedDoc.querySelector(".report-actions");
-      if (actions) actions.style.display = "none";
-    },
-  })
-    .then((canvas) => {
-      const link = document.createElement("a");
-      link.download = `attendance-report-${state.viewingDateKey}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    })
-    .catch((err) => {
-      console.error("Could not generate report image:", err);
-      window.alert("Something went wrong generating the image. Please try again.");
-    })
-    .finally(() => {
-      window.scrollTo(scrollX, scrollY);
-      btn.textContent = originalLabel;
-      btn.disabled = false;
-    });
+    await wait(400);
+
+    btn.textContent = "Generating page 2…";
+    const canvas2 = await captureReportPage(target, "page2");
+    downloadCanvasAsPng(canvas2, `attendance-report-page2-${state.viewingDateKey}.png`);
+  } catch (err) {
+    console.error("Could not generate report images:", err);
+    window.alert("Something went wrong generating the images. Please try again.");
+  } finally {
+    // Restore whichever page was actually showing on screen before we
+    // started swapping pages in the (separate) cloned documents.
+    switchReportPage(originalPage);
+    window.scrollTo(scrollX, scrollY);
+    btn.textContent = originalLabel;
+    btn.disabled = false;
+  }
 }
 
 /* ==========================================================================
@@ -992,6 +1076,7 @@ function bindEvents() {
   dom.reportModeBtn.addEventListener("click", enterReportMode);
   dom.exitReportBtn.addEventListener("click", exitReportMode);
   dom.downloadReportBtn.addEventListener("click", downloadReportImage);
+  dom.reportPageTabs.addEventListener("click", onReportPageTabClick);
 
   dom.piSportSelect.addEventListener("change", onPiSportChange);
   dom.piSearchInput.addEventListener("input", onPiSearchInput);
