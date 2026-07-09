@@ -588,12 +588,16 @@ function buildReportRows(players, record) {
 
       return `
         <div class="report-row ${isPresent ? "present" : ""}">
-          <span class="report-row-index">${index + 1}.</span>
-          <span class="report-row-name">${escapeHtml(shortenNameForReport(p.name))}</span>
-          ${isPresent
-            ? `<span class="report-row-time"><span class="report-time-value">${time}</span><span class="report-time-meridiem">${meridiem}</span></span>`
-            : `<span class="report-row-status">ABSENT</span>`
-          }
+          <div class="report-row-top">
+            <span class="report-row-index">${index + 1}.</span>
+            <span class="report-row-name">${escapeHtml(shortenNameForReport(p.name))}</span>
+          </div>
+          <div class="report-row-bottom">
+            ${isPresent
+              ? `<span class="report-row-time">${time} <span class="report-time-meridiem">${meridiem}</span></span>`
+              : `<span class="report-row-status">ABSENT</span>`
+            }
+          </div>
         </div>
       `;
     })
