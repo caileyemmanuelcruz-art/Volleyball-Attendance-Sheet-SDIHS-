@@ -39,7 +39,6 @@ const ROSTER = [
   { id: "b16", name: "Mendoza, Mark Gabriel", gender: "Boy", grade: 10, section: "Sierra Madre", birthday: "05/02/2011" },
   { id: "b19", name: "Popanes, Jhay M.", gender: "Boy", grade: 9, section: "Magalang", birthday: "06/08/2011" },
   { id: "b20", name: "Ramos, Gabriel", gender: "Boy", grade: 10, section: "Kanlaon", birthday: "01/14/2011" },
-  { id: "b21", name: "Redoma, Robert M.", gender: "Boy", grade: 8, section: "Ephesians", birthday: "09/22/2011" },
   { id: "b22", name: "Rodriguez, Jhon Ruan", gender: "Boy", grade: 11, section: "Yakal", birthday: "03/07/2010" },
   { id: "b24", name: "Satingin, John Kaizer", gender: "Boy", grade: 11, section: "Yakal", birthday: "01/11/2010" },
   { id: "b25", name: "Umali, Yale Rayven G.", gender: "Boy", grade: 11, section: "Yakal", birthday: "03/29/2009" },
@@ -61,7 +60,6 @@ const ROSTER = [
   { id: "g21", name: "Rebecca, Rhianne", gender: "Girl", grade: 9, section: "Mabait", birthday: "07/10/2011" },
   { id: "g22", name: "Regodon, Cezanne", gender: "Girl", grade: 9, section: "Mapagmahal", birthday: "11/26/2011" },
   { id: "g23", name: "Salanatin, Daniela Corazon", gender: "Girl", grade: 11, section: "Yakal", birthday: "02/15/2010" },
-  { id: "g24", name: "Santos, Kim Andrea O.", gender: "Girl", grade: 9, section: "Mapagmahal", birthday: "08/17/2012" },
   { id: "g25", name: "Satingin, Janyra", gender: "Girl", grade: 7, section: "Garcia", birthday: "01/21/2012" },
   { id: "g26", name: "Tapas, Samantha Faye B.", gender: "Girl", grade: 8, section: "Ephesians", birthday: "08/12/2012" },
 ];
@@ -369,6 +367,14 @@ const dom = {
   controlsSection: document.getElementById("controlsSection"),
   searchInput: document.getElementById("searchInput"),
   dateSelect: document.getElementById("dateSelect"),
+  dateWrap: document.getElementById("dateWrap"),
+  calendarTriggerBtn: document.getElementById("calendarTriggerBtn"),
+  calendarPopover: document.getElementById("calendarPopover"),
+  calendarPrevBtn: document.getElementById("calendarPrevBtn"),
+  calendarNextBtn: document.getElementById("calendarNextBtn"),
+  calendarMonthLabel: document.getElementById("calendarMonthLabel"),
+  calendarDays: document.getElementById("calendarDays"),
+  calendarCloseBtn: document.getElementById("calendarCloseBtn"),
   lockToggleBtn: document.getElementById("lockToggleBtn"),
   reportModeBtn: document.getElementById("reportModeBtn"),
   genderFilter: document.getElementById("genderFilter"),
@@ -428,6 +434,14 @@ const dom = {
   bbControlsSection: document.getElementById("bbControlsSection"),
   bbSearchInput: document.getElementById("bbSearchInput"),
   bbDateSelect: document.getElementById("bbDateSelect"),
+  bbDateWrap: document.getElementById("bbDateWrap"),
+  bbCalendarTriggerBtn: document.getElementById("bbCalendarTriggerBtn"),
+  bbCalendarPopover: document.getElementById("bbCalendarPopover"),
+  bbCalendarPrevBtn: document.getElementById("bbCalendarPrevBtn"),
+  bbCalendarNextBtn: document.getElementById("bbCalendarNextBtn"),
+  bbCalendarMonthLabel: document.getElementById("bbCalendarMonthLabel"),
+  bbCalendarDays: document.getElementById("bbCalendarDays"),
+  bbCalendarCloseBtn: document.getElementById("bbCalendarCloseBtn"),
   bbLockToggleBtn: document.getElementById("bbLockToggleBtn"),
   bbReportModeBtn: document.getElementById("bbReportModeBtn"),
   bbGradeFilter: document.getElementById("bbGradeFilter"),
@@ -453,6 +467,18 @@ const dom = {
   bbReportListP2: document.getElementById("bbReportListP2"),
   bbExitReportBtn: document.getElementById("bbExitReportBtn"),
   bbDownloadReportBtn: document.getElementById("bbDownloadReportBtn"),
+
+  // Password modal (styled replacement for window.prompt())
+  passwordModalOverlay: document.getElementById("passwordModalOverlay"),
+  passwordModal: document.getElementById("passwordModal"),
+  passwordModalIcon: document.getElementById("passwordModalIcon"),
+  passwordModalTitle: document.getElementById("passwordModalTitle"),
+  passwordModalMessage: document.getElementById("passwordModalMessage"),
+  passwordModalForm: document.getElementById("passwordModalForm"),
+  passwordModalInput: document.getElementById("passwordModalInput"),
+  passwordModalError: document.getElementById("passwordModalError"),
+  passwordModalCancelBtn: document.getElementById("passwordModalCancelBtn"),
+  passwordModalOkBtn: document.getElementById("passwordModalOkBtn"),
 
   // Hidden timestamp editor modal
   secretEditorOverlay: document.getElementById("secretEditorOverlay"),
@@ -1236,16 +1262,24 @@ function getFilteredSortedRoster() {
    rather than remembering that an update occurred.
    ========================================================================== */
 
-function computeAllSeasonStats(roster = ROSTER) {
+// Dates (as a Set of "YYYY-MM-DD" keys) where at least one player FROM THIS
+// ROSTER was marked present — scoped per sport, so a volleyball training
+// day doesn't count as one for basketball, and vice versa. Shared by the
+// season-stats calculator and the calendar's "highlight training days"
+// feature below.
+function getTrainingDateSet(roster) {
   const allRecords = getAllRecords();
   const rosterIds = new Set(roster.map((p) => p.id));
-
-  // Only keep dates where at least one player FROM THIS ROSTER was present —
-  // scoped per sport, so a volleyball training day doesn't inflate a
-  // basketball player's "trainings held" count, and vice versa.
-  const trainingDates = Object.keys(allRecords).filter((date) =>
-    Object.entries(allRecords[date]).some(([playerId, entry]) => rosterIds.has(playerId) && entry && entry.present)
+  return new Set(
+    Object.keys(allRecords).filter((date) =>
+      Object.entries(allRecords[date]).some(([playerId, entry]) => rosterIds.has(playerId) && entry && entry.present)
+    )
   );
+}
+
+function computeAllSeasonStats(roster = ROSTER) {
+  const allRecords = getAllRecords();
+  const trainingDates = getTrainingDateSet(roster);
 
   const stats = {};
 
@@ -1256,12 +1290,138 @@ function computeAllSeasonStats(roster = ROSTER) {
     });
     stats[p.id] = {
       present: present,
-      absent: trainingDates.length - present,
-      trainings: trainingDates.length,
+      absent: trainingDates.size - present,
+      trainings: trainingDates.size,
     };
   });
 
   return stats;
+}
+
+/* ==========================================================================
+   10b. CALENDAR — date picker with training days highlighted
+   Native <input type="date"> calendars are rendered by the OS/browser and
+   can't be styled or annotated from the page — there's no way to put a dot
+   on specific dates inside one. This is a small custom calendar that opens
+   on top of it instead: picking a day here just sets the native input's
+   value and fires a "change" event, so every existing date-handling
+   function keeps working untouched. One config per sport, since each has
+   its own date field and its own roster's training days.
+   ========================================================================== */
+
+const calendarConfigs = {
+  volleyball: {
+    wrap: () => dom.dateWrap,
+    trigger: () => dom.calendarTriggerBtn,
+    overlay: () => dom.calendarPopover,
+    prevBtn: () => dom.calendarPrevBtn,
+    nextBtn: () => dom.calendarNextBtn,
+    monthLabel: () => dom.calendarMonthLabel,
+    daysEl: () => dom.calendarDays,
+    closeBtn: () => dom.calendarCloseBtn,
+    dateInput: () => dom.dateSelect,
+    roster: () => ROSTER,
+    getViewingDateKey: () => state.viewingDateKey,
+    viewMonth: null,
+  },
+  basketball: {
+    wrap: () => dom.bbDateWrap,
+    trigger: () => dom.bbCalendarTriggerBtn,
+    overlay: () => dom.bbCalendarPopover,
+    prevBtn: () => dom.bbCalendarPrevBtn,
+    nextBtn: () => dom.bbCalendarNextBtn,
+    monthLabel: () => dom.bbCalendarMonthLabel,
+    daysEl: () => dom.bbCalendarDays,
+    closeBtn: () => dom.bbCalendarCloseBtn,
+    dateInput: () => dom.bbDateSelect,
+    roster: () => ROSTER_BASKETBALL,
+    getViewingDateKey: () => state.bbViewingDateKey,
+    viewMonth: null,
+  },
+};
+
+function openCalendar(key) {
+  const cfg = calendarConfigs[key];
+  const viewingDateKey = cfg.getViewingDateKey();
+  cfg.viewMonth = new Date(viewingDateKey + "T00:00:00");
+  cfg.viewMonth.setDate(1);
+  renderCalendar(key);
+  cfg.overlay().classList.remove("hidden");
+}
+
+function closeCalendar(key) {
+  calendarConfigs[key].overlay().classList.add("hidden");
+}
+
+function renderCalendar(key) {
+  const cfg = calendarConfigs[key];
+  const monthDate = cfg.viewMonth;
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+
+  cfg.monthLabel().textContent = monthDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  const trainingDates = getTrainingDateSet(cfg.roster());
+  const selectedKey = cfg.getViewingDateKey();
+  const todayK = todayKey();
+
+  const firstWeekday = new Date(year, month, 1).getDay(); // 0 = Sunday
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  let html = "";
+  for (let i = 0; i < firstWeekday; i++) {
+    html += `<span class="calendar-day calendar-day-empty"></span>`;
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dKey = toDateKey(new Date(year, month, d));
+    const isFuture = dKey > todayK;
+    const classes = ["calendar-day"];
+    if (dKey === todayK) classes.push("is-today");
+    if (dKey === selectedKey) classes.push("is-selected");
+    if (trainingDates.has(dKey)) classes.push("has-training");
+
+    html += `<button type="button" class="${classes.join(" ")}" data-date="${dKey}" ${isFuture ? "disabled" : ""}>${d}</button>`;
+  }
+
+  cfg.daysEl().innerHTML = html;
+
+  // Can't navigate into future months.
+  const now = new Date();
+  cfg.nextBtn().disabled = year === now.getFullYear() && month === now.getMonth();
+}
+
+function onCalendarDaysClick(key, e) {
+  const btn = e.target.closest(".calendar-day");
+  if (!btn || btn.disabled || !btn.dataset.date) return;
+
+  const input = calendarConfigs[key].dateInput();
+  input.value = btn.dataset.date;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  closeCalendar(key);
+}
+
+function bindCalendarEvents(key) {
+  const cfg = calendarConfigs[key];
+
+  // Anywhere in the date field opens the custom calendar — the button click
+  // bubbles up to this same listener, so there's only one date picker in
+  // the whole app, not a native one AND a custom one.
+  cfg.wrap().addEventListener("click", () => openCalendar(key));
+
+  cfg.closeBtn().addEventListener("click", () => closeCalendar(key));
+  cfg.overlay().addEventListener("click", (e) => {
+    if (e.target === cfg.overlay()) closeCalendar(key); // click on backdrop closes it
+  });
+  cfg.prevBtn().addEventListener("click", () => {
+    cfg.viewMonth.setMonth(cfg.viewMonth.getMonth() - 1);
+    renderCalendar(key);
+  });
+  cfg.nextBtn().addEventListener("click", () => {
+    cfg.viewMonth.setMonth(cfg.viewMonth.getMonth() + 1);
+    renderCalendar(key);
+  });
+  cfg.daysEl().addEventListener("click", (e) => onCalendarDaysClick(key, e));
 }
 
 /* ==========================================================================
@@ -1270,6 +1430,65 @@ function computeAllSeasonStats(roster = ROSTER) {
    coach password unlocks marking attendance today AND editing/correcting
    past, otherwise read-only, attendance sheets. It re-locks on refresh.
    ========================================================================== */
+
+// Currently-pending submit handler for the password modal. Set by
+// showPasswordPrompt(), called by handlePasswordModalSubmit(), and cleared
+// once the modal closes (success or cancel).
+let passwordModalSubmitHandler = null;
+
+// Styled stand-in for window.prompt(), shared by coach lock/unlock and the
+// hidden time editor's access code screen. onSubmit receives the entered
+// text and should return true to close the modal, or false/falsy to show
+// an inline "incorrect" error and let the person try again.
+function showPasswordPrompt({ title, message, buttonLabel = "Unlock", icon = "🔒", onSubmit }) {
+  dom.passwordModalIcon.textContent = icon;
+  dom.passwordModalTitle.textContent = title;
+  dom.passwordModalMessage.textContent = message;
+  dom.passwordModalOkBtn.textContent = buttonLabel;
+  dom.passwordModalInput.value = "";
+  dom.passwordModalError.classList.add("hidden");
+  dom.passwordModalOverlay.classList.remove("hidden");
+  passwordModalSubmitHandler = onSubmit;
+  setTimeout(() => dom.passwordModalInput.focus(), 50);
+}
+
+function closePasswordPrompt() {
+  dom.passwordModalOverlay.classList.add("hidden");
+  passwordModalSubmitHandler = null;
+}
+
+function handlePasswordModalSubmit(e) {
+  e.preventDefault();
+  if (!passwordModalSubmitHandler) return;
+
+  const value = dom.passwordModalInput.value;
+  const ok = passwordModalSubmitHandler(value);
+
+  if (ok) {
+    closePasswordPrompt();
+    return;
+  }
+
+  dom.passwordModalError.classList.remove("hidden");
+  dom.passwordModalInput.value = "";
+  dom.passwordModalInput.focus();
+  dom.passwordModal.classList.remove("shake");
+  void dom.passwordModal.offsetWidth; // restart the shake animation
+  dom.passwordModal.classList.add("shake");
+}
+
+function bindPasswordModalEvents() {
+  dom.passwordModalForm.addEventListener("submit", handlePasswordModalSubmit);
+  dom.passwordModalCancelBtn.addEventListener("click", closePasswordPrompt);
+  dom.passwordModalOverlay.addEventListener("click", (e) => {
+    if (e.target === dom.passwordModalOverlay) closePasswordPrompt();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !dom.passwordModalOverlay.classList.contains("hidden")) {
+      closePasswordPrompt();
+    }
+  });
+}
 
 function updateLockButton() {
   const buttons = [dom.lockToggleBtn, dom.bbLockToggleBtn];
@@ -1295,15 +1514,21 @@ function toggleLock() {
     return;
   }
 
-  const entered = window.prompt("Enter coach password to unlock editing:");
-  if (entered === null) return; // cancelled
-  if (entered === COACH_PASSWORD) {
-    state.unlocked = true;
-    updateLockButton();
-    refreshAll();
-  } else {
-    window.alert("Incorrect password.");
-  }
+  showPasswordPrompt({
+    title: "Coach Access",
+    message: "Enter the coach password to unlock editing.",
+    buttonLabel: "Unlock",
+    icon: "🔒",
+    onSubmit: (entered) => {
+      if (entered === COACH_PASSWORD) {
+        state.unlocked = true;
+        updateLockButton();
+        refreshAll();
+        return true;
+      }
+      return false;
+    },
+  });
 }
 
 /* ==========================================================================
@@ -1683,13 +1908,19 @@ function handleSecretTriggerClick() {
 }
 
 function openSecretTimeEditor() {
-  const code = window.prompt("Access code:");
-  if (code === null) return; // cancelled
-  if (code !== TIME_EDIT_PASSWORD) {
-    window.alert("Incorrect code.");
-    return;
-  }
-  openSecretEditorModal();
+  showPasswordPrompt({
+    title: "Time Editor Access",
+    message: "Enter the access code to edit attendance times.",
+    buttonLabel: "Continue",
+    icon: "🕒",
+    onSubmit: (code) => {
+      if (code === TIME_EDIT_PASSWORD) {
+        openSecretEditorModal();
+        return true;
+      }
+      return false;
+    },
+  });
 }
 
 // "8:45 AM" or "8:45:30 AM" -> canonical "8:45:00 AM" / "8:45:30 AM" to
@@ -2022,6 +2253,10 @@ function bindEvents() {
 
   bindSecretTimeEditorTrigger();
   bindSecretEditorModalEvents();
+  bindPasswordModalEvents();
+
+  bindCalendarEvents("volleyball");
+  bindCalendarEvents("basketball");
 }
 
 async function init() {

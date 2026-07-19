@@ -71,9 +71,28 @@
           <input type="search" id="searchInput" placeholder="Search by student name..." aria-label="Search by student name">
         </div>
 
-        <div class="date-wrap">
+        <div class="date-wrap" id="dateWrap">
           <label for="dateSelect" class="date-label">Viewing</label>
-          <input type="date" id="dateSelect" aria-label="Select attendance date">
+          <input type="date" id="dateSelect" aria-label="Select attendance date" readonly>
+          <button type="button" class="calendar-trigger-btn" id="calendarTriggerBtn" aria-label="Open calendar with training days highlighted">📅</button>
+        </div>
+
+        <div class="calendar-overlay hidden" id="calendarPopover">
+          <div class="calendar-modal" role="dialog" aria-label="Select a date">
+            <div class="calendar-popover-header">
+              <button type="button" class="calendar-nav-btn" id="calendarPrevBtn" aria-label="Previous month">‹</button>
+              <span id="calendarMonthLabel" class="calendar-month-label"></span>
+              <button type="button" class="calendar-nav-btn" id="calendarNextBtn" aria-label="Next month">›</button>
+            </div>
+            <div class="calendar-weekdays">
+              <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+            </div>
+            <div class="calendar-days" id="calendarDays"></div>
+            <div class="calendar-popover-footer">
+              <span class="calendar-legend"><span class="calendar-dot"></span> Training day</span>
+              <button type="button" class="btn-link" id="calendarCloseBtn">Close</button>
+            </div>
+          </div>
         </div>
 
         <button id="lockToggleBtn" class="btn-lock locked" type="button">🔒 Locked</button>
@@ -236,9 +255,28 @@
           <input type="search" id="bbSearchInput" placeholder="Search by student name..." aria-label="Search by student name">
         </div>
 
-        <div class="date-wrap">
+        <div class="date-wrap" id="bbDateWrap">
           <label for="bbDateSelect" class="date-label">Viewing</label>
-          <input type="date" id="bbDateSelect" aria-label="Select attendance date">
+          <input type="date" id="bbDateSelect" aria-label="Select attendance date" readonly>
+          <button type="button" class="calendar-trigger-btn" id="bbCalendarTriggerBtn" aria-label="Open calendar with training days highlighted">📅</button>
+        </div>
+
+        <div class="calendar-overlay hidden" id="bbCalendarPopover">
+          <div class="calendar-modal" role="dialog" aria-label="Select a date">
+            <div class="calendar-popover-header">
+              <button type="button" class="calendar-nav-btn" id="bbCalendarPrevBtn" aria-label="Previous month">‹</button>
+              <span id="bbCalendarMonthLabel" class="calendar-month-label"></span>
+              <button type="button" class="calendar-nav-btn" id="bbCalendarNextBtn" aria-label="Next month">›</button>
+            </div>
+            <div class="calendar-weekdays">
+              <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+            </div>
+            <div class="calendar-days" id="bbCalendarDays"></div>
+            <div class="calendar-popover-footer">
+              <span class="calendar-legend"><span class="calendar-dot"></span> Training day</span>
+              <button type="button" class="btn-link" id="bbCalendarCloseBtn">Close</button>
+            </div>
+          </div>
         </div>
 
         <button id="bbLockToggleBtn" class="btn-lock locked" type="button">🔒 Locked</button>
@@ -456,6 +494,27 @@
       <button id="secretSaveBtn" class="btn-primary" type="button">Save All</button>
       <button id="secretCancelBtn" class="btn-link" type="button">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- ======================================================================
+     PASSWORD MODAL — styled replacement for window.prompt(), reused by
+     both the coach lock/unlock and the hidden time editor's access code.
+     ====================================================================== -->
+<div id="passwordModalOverlay" class="password-overlay hidden">
+  <div class="password-modal" id="passwordModal" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
+    <div class="password-modal-icon" id="passwordModalIcon">🔒</div>
+    <h2 id="passwordModalTitle" class="password-modal-title">Enter Password</h2>
+    <p id="passwordModalMessage" class="password-modal-message"></p>
+
+    <form id="passwordModalForm" class="password-modal-form" autocomplete="off">
+      <input type="password" id="passwordModalInput" class="password-modal-input" placeholder="Password" autocomplete="new-password" aria-label="Password">
+      <p id="passwordModalError" class="password-modal-error hidden">⚠ Incorrect password. Try again.</p>
+      <div class="password-modal-actions">
+        <button type="button" id="passwordModalCancelBtn" class="btn-secondary">Cancel</button>
+        <button type="submit" id="passwordModalOkBtn" class="btn-primary">Unlock</button>
+      </div>
+    </form>
   </div>
 </div>
 
